@@ -169,23 +169,23 @@ async function saveDatabase() {
 function activarSyncTiempoReal() {
     COL.catalog.onSnapshot(snap => {
         if (snap.metadata.hasPendingWrites) return; // ignorar cambios locales propios
-        const nuevos = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
-        if (nuevos.length > 0) {
-            state.catalog = nuevos;
-            renderApp();
-        }
+        state.catalog = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+        renderApp();
     });
     COL.sales.onSnapshot(snap => {
         if (snap.metadata.hasPendingWrites) return;
         state.sales = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+        renderApp();
     });
     COL.purchases.onSnapshot(snap => {
         if (snap.metadata.hasPendingWrites) return;
         state.purchases = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+        renderApp();
     });
     COL.closures.onSnapshot(snap => {
         if (snap.metadata.hasPendingWrites) return;
         state.closures = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+        renderApp();
     });
 }
 
