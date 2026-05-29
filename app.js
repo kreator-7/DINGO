@@ -1,16 +1,55 @@
 // ============================================================
-//  DINGO DB — IndexedDB via Dexie.js
+//  DINGO DB — Firebase Firestore (sincronización en la nube)
 // ============================================================
 
-const db = new Dexie('DingoDB');
-db.version(1).stores({
-    catalog:    '++id, barcode, category, name',
-    categories: '++id, name',
-    purchases:  '++id, productId, date',
-    sales:      '++id, date, method',
-    closures:   '++id, date',
-    settings:   'key'
-});
+const firebaseConfig = {
+    apiKey: "AIzaSyB5KwDGBXU6AIKakRmKnq1cbdWdwAq7JPk",
+    authDomain: "dingo-pos.firebaseapp.com",
+    projectId: "dingo-pos",
+    storageBucket: "dingo-pos.firebasestorage.app",
+    messagingSenderId: "1016223041034",
+    appId: "1:1016223041034:web:403777d442f6e4c03b81f3",
+    measurementId: "G-9Y3TMVB6G7"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// Colecciones en Firestore
+const COL = {
+    catalog:    db.collection('catalog'),
+    categories: db.collection('categories'),
+    purchases:  db.collection('purchases'),
+    sales:      db.collection('sales'),
+    closures:   db.collection('closures'),
+    settings:   db.collection('settings'),
+};
+
+// Helpers para leer/escribir documentos simples
+async function fsGet(col, id) {
+    const snap = await COL[col].doc(id).get();
+    return snap.exists ? snap.data() : null;
+}
+async function fsPut(col, id, data) {
+    await COL[col].doc(id).set(data);
+}
+async function fsGetAll(col) {
+    const snap = await COL[col].get();
+    return snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+}
+async function fsClearAndBulk(col, items) {
+    const batch = db.batch();
+    // Borrar todos los documentos existentes
+    const existing = await COL[col].get();
+    existing.docs.forEach(d => batch.delete(d.ref));
+    // Agregar los nuevos
+    items.forEach(item => {
+        const ref = COL[col].doc(String(item.id ?? item.key ?? db.collection('_').doc().id));
+        batch.set(ref, item);
+    });
+    await batch.commit();
+}
+
 
 const defaultCatalog = [
     { id: 1, name: 'Manzanas Frescas (1kg)', price: 15.50, buyPrice: 10.00, stock: 50, unit: 'Bs', barcode: '100000000001', category: 'Frescos', image: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6fac6?auto=format&fit=crop&q=80&w=400', tag: 'Orgánico' },
@@ -52,96 +91,102 @@ const state = {
 
 async function loadDatabase() {
     try {
-        // 1. Migración automática desde localStorage si existe
-        if (localStorage.getItem('dingo_catalog')) {
-            console.log("Migrando datos de localStorage a IndexedDB...");
-            
-            const cat = JSON.parse(localStorage.getItem('dingo_catalog') || '[]');
-            const cats = JSON.parse(localStorage.getItem('dingo_categories') || '[]');
-            const pur = JSON.parse(localStorage.getItem('dingo_purchases') || '[]');
-            const sal = JSON.parse(localStorage.getItem('dingo_sales') || '[]');
-            const clo = JSON.parse(localStorage.getItem('dingo_closures') || '[]');
-            const sImg = localStorage.getItem('dingo_scanner_image');
-            const qImg = localStorage.getItem('dingo_qr_image');
-            const lastDate = localStorage.getItem('dingo_last_active_date');
+        showToast("Conectando con la nube...", "cloud");
 
-            if (cat.length > 0) await db.catalog.bulkPut(cat);
-            if (cats.length > 0) await db.categories.bulkPut(cats.map((name, i) => ({id: i+1, name})));
-            if (pur.length > 0) await db.purchases.bulkPut(pur);
-            if (sal.length > 0) await db.sales.bulkPut(sal);
-            if (clo.length > 0) await db.closures.bulkPut(clo);
-            
-            const cDate = localStorage.getItem('dingo_caja_chica_date');
-            const cAmt = localStorage.getItem('dingo_caja_chica_amount');
-            
-            if(sImg) await db.settings.put({key: 'scannerImage', value: sImg});
-            if(qImg) await db.settings.put({key: 'qrImage', value: qImg});
-            if(lastDate) await db.settings.put({key: 'lastActiveDate', value: lastDate});
-            if(cDate) await db.settings.put({key: 'cajaChicaDate', value: cDate});
-            if(cAmt) await db.settings.put({key: 'cajaChicaAmount', value: parseFloat(cAmt)});
+        // Leer todas las colecciones en paralelo desde Firestore
+        const [loadedCatalog, loadedCategories, loadedPurchases, loadedSales, loadedClosures] = await Promise.all([
+            fsGetAll('catalog'),
+            fsGetAll('categories'),
+            fsGetAll('purchases'),
+            fsGetAll('sales'),
+            fsGetAll('closures'),
+        ]);
 
-            localStorage.clear();
-            setTimeout(() => showToast("Base de datos mejorada (Migración exitosa)", "database"), 1500);
+        const sImg    = await fsGet('settings', 'scannerImage');
+        const qImg    = await fsGet('settings', 'qrImage');
+        const lastDate = await fsGet('settings', 'lastActiveDate');
+        const cDate   = await fsGet('settings', 'cajaChicaDate');
+        const cAmt    = await fsGet('settings', 'cajaChicaAmount');
+
+        // Si Firestore está vacío, subir los datos por defecto
+        if (loadedCatalog.length === 0) {
+            console.log('Firestore vacío — cargando datos por defecto...');
+            await fsClearAndBulk('catalog', defaultCatalog);
+            await fsClearAndBulk('categories', defaultCategories.map((name, i) => ({ id: i + 1, name })));
+            state.catalog = defaultCatalog;
+            state.categories = defaultCategories;
+        } else {
+            state.catalog = loadedCatalog;
+            state.categories = loadedCategories.length > 0
+                ? loadedCategories.sort((a,b) => (a.id||0)-(b.id||0)).map(c => c.name)
+                : defaultCategories;
         }
 
-        // 2. Cargar datos desde IndexedDB
-        const loadedCatalog = await db.catalog.toArray();
-        const loadedCategories = await db.categories.toArray();
-        const loadedPurchases = await db.purchases.toArray();
-        const loadedSales = await db.sales.toArray();
-        const loadedClosures = await db.closures.toArray();
-        
-        const sImg = await db.settings.get('scannerImage');
-        const qImg = await db.settings.get('qrImage');
-        const lastDate = await db.settings.get('lastActiveDate');
-        const cDate = await db.settings.get('cajaChicaDate');
-        const cAmt = await db.settings.get('cajaChicaAmount');
-
-        state.catalog = loadedCatalog.length > 0 ? loadedCatalog : defaultCatalog;
-        state.categories = loadedCategories.length > 0 ? loadedCategories.map(c => c.name) : defaultCategories;
         state.purchases = loadedPurchases;
-        state.sales = loadedSales;
-        state.closures = loadedClosures;
-        
-        if(sImg) state.scannerImage = sImg.value;
-        if(qImg) state.qrImage = qImg.value;
-        if(lastDate) state.lastActiveDate = lastDate.value;
-        if(cDate) state.cajaChicaDate = cDate.value;
-        if(cAmt) state.cajaChicaAmount = cAmt.value;
+        state.sales     = loadedSales;
+        state.closures  = loadedClosures;
+
+        if (sImg)    state.scannerImage    = sImg.value;
+        if (qImg)    state.qrImage         = qImg.value;
+        if (lastDate) state.lastActiveDate = lastDate.value;
+        if (cDate)   state.cajaChicaDate   = cDate.value;
+        if (cAmt)    state.cajaChicaAmount = cAmt.value;
+
+        // Activar sincronización en tiempo real
+        activarSyncTiempoReal();
+
+        setTimeout(() => showToast("✅ Conectado a la nube", "cloud"), 500);
 
     } catch (error) {
-        console.error("Error inicializando base de datos:", error);
+        console.error("Error cargando desde Firestore:", error);
+        showToast("Error al conectar con la nube", "alert-triangle");
     }
 }
 
 async function saveDatabase() {
     try {
-        await db.transaction('rw', db.catalog, db.categories, db.purchases, db.sales, db.closures, db.settings, async () => {
-            await db.catalog.clear();
-            await db.catalog.bulkAdd(state.catalog);
-            
-            await db.categories.clear();
-            await db.categories.bulkAdd(state.categories.map((name, i) => ({id: i+1, name})));
-            
-            await db.purchases.clear();
-            await db.purchases.bulkAdd(state.purchases);
-            
-            await db.sales.clear();
-            await db.sales.bulkAdd(state.sales);
-            
-            await db.closures.clear();
-            await db.closures.bulkAdd(state.closures);
-            
-            await db.settings.put({key: 'scannerImage', value: state.scannerImage});
-            await db.settings.put({key: 'qrImage', value: state.qrImage});
-            await db.settings.put({key: 'lastActiveDate', value: state.lastActiveDate});
-            await db.settings.put({key: 'cajaChicaDate', value: state.cajaChicaDate});
-            await db.settings.put({key: 'cajaChicaAmount', value: state.cajaChicaAmount});
-        });
+        await Promise.all([
+            fsClearAndBulk('catalog',    state.catalog),
+            fsClearAndBulk('categories', state.categories.map((name, i) => ({ id: i + 1, name }))),
+            fsClearAndBulk('purchases',  state.purchases),
+            fsClearAndBulk('sales',      state.sales),
+            fsClearAndBulk('closures',   state.closures),
+        ]);
+        await Promise.all([
+            fsPut('settings', 'scannerImage',    { value: state.scannerImage }),
+            fsPut('settings', 'qrImage',         { value: state.qrImage }),
+            fsPut('settings', 'lastActiveDate',  { value: state.lastActiveDate }),
+            fsPut('settings', 'cajaChicaDate',   { value: state.cajaChicaDate }),
+            fsPut('settings', 'cajaChicaAmount', { value: state.cajaChicaAmount }),
+        ]);
     } catch(error) {
-        console.error("Error guardando base de datos:", error);
-        showToast("Error al guardar datos", "alert-triangle");
+        console.error("Error guardando en Firestore:", error);
+        showToast("Error al guardar datos en la nube", "alert-triangle");
     }
+}
+
+// Sincronización en tiempo real: recarga la app cuando otro dispositivo hace cambios
+function activarSyncTiempoReal() {
+    COL.catalog.onSnapshot(snap => {
+        if (snap.metadata.hasPendingWrites) return; // ignorar cambios locales propios
+        const nuevos = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+        if (nuevos.length > 0) {
+            state.catalog = nuevos;
+            renderApp();
+        }
+    });
+    COL.sales.onSnapshot(snap => {
+        if (snap.metadata.hasPendingWrites) return;
+        state.sales = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+    });
+    COL.purchases.onSnapshot(snap => {
+        if (snap.metadata.hasPendingWrites) return;
+        state.purchases = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+    });
+    COL.closures.onSnapshot(snap => {
+        if (snap.metadata.hasPendingWrites) return;
+        state.closures = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+    });
 }
 
 async function exportDatabase() {
