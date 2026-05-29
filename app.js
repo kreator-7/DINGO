@@ -500,7 +500,7 @@ function renderSettings() {
                 ${state.currentUserRole === 'admin' ? `
                 <div class="settings-item glass" onclick="openUserManagementModal()" style="cursor: pointer; background: rgba(138, 43, 226, 0.05); border: 1px solid rgba(138, 43, 226, 0.2);">
                     ${getIcon('users', 'color: #8a2be2;')}
-                    <div style="flex: 1; font-weight: 600; color: #8a2be2;">Gestión de Usuarios y Roles</div>
+                    <div style="flex: 1; font-weight: 600; color: #8a2be2;">Usuarios</div>
                     ${getIcon('chevron-right', 'color: #8a2be2;')}
                 </div>
                 ` : ''}
