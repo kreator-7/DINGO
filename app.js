@@ -23,6 +23,7 @@ const COL = {
     sales:      db.collection('sales'),
     closures:   db.collection('closures'),
     settings:   db.collection('settings'),
+    users:      db.collection('users'),
 };
 
 // Helpers para leer/escribir documentos simples
@@ -62,9 +63,16 @@ const defaultCatalog = [
 
 const defaultCategories = ['Todo', 'Frescos', 'Lácteos', 'Carnes', 'Bebidas', 'Panadería', 'Otros'];
 
+const defaultUsers = [
+    { id: 1, name: 'Administrador', password: 'admin', role: 'admin' },
+    { id: 2, name: 'Cajero', password: '123', role: 'cashier' }
+];
+
 const state = {
     currentUserRole: null, // 'admin' or 'cashier'
+    currentUserName: null, // Nombre del usuario logueado
     currentTab: 'pos', // 'pos', 'delivery', 'catalog', 'settings'
+    users: [],
     cart: [],
     catalog: [],
     categories: [],
@@ -94,12 +102,13 @@ async function loadDatabase() {
         showToast("Conectando con la nube...", "cloud");
 
         // Leer todas las colecciones en paralelo desde Firestore
-        const [loadedCatalog, loadedCategories, loadedPurchases, loadedSales, loadedClosures] = await Promise.all([
+        const [loadedCatalog, loadedCategories, loadedPurchases, loadedSales, loadedClosures, loadedUsers] = await Promise.all([
             fsGetAll('catalog'),
             fsGetAll('categories'),
             fsGetAll('purchases'),
             fsGetAll('sales'),
             fsGetAll('closures'),
+            fsGetAll('users'),
         ]);
 
         const sImg    = await fsGet('settings', 'scannerImage');
@@ -113,13 +122,21 @@ async function loadDatabase() {
             console.log('Firestore vacío — cargando datos por defecto...');
             await fsClearAndBulk('catalog', defaultCatalog);
             await fsClearAndBulk('categories', defaultCategories.map((name, i) => ({ id: i + 1, name })));
+            await fsClearAndBulk('users', defaultUsers);
             state.catalog = defaultCatalog;
             state.categories = defaultCategories;
+            state.users = defaultUsers;
         } else {
             state.catalog = loadedCatalog;
             state.categories = loadedCategories.length > 0
                 ? loadedCategories.sort((a,b) => (a.id||0)-(b.id||0)).map(c => c.name)
                 : defaultCategories;
+            state.users = loadedUsers.length > 0 ? loadedUsers : defaultUsers;
+            
+            // Si users está vacío en una DB existente, rellenamos y subimos
+            if (loadedUsers.length === 0) {
+                await fsClearAndBulk('users', defaultUsers);
+            }
         }
 
         state.purchases = loadedPurchases;
@@ -151,6 +168,7 @@ async function saveDatabase() {
             fsClearAndBulk('purchases',  state.purchases),
             fsClearAndBulk('sales',      state.sales),
             fsClearAndBulk('closures',   state.closures),
+            fsClearAndBulk('users',      state.users),
         ]);
         await Promise.all([
             fsPut('settings', 'scannerImage',    { value: state.scannerImage }),
@@ -185,6 +203,11 @@ function activarSyncTiempoReal() {
     COL.closures.onSnapshot(snap => {
         if (snap.metadata.hasPendingWrites) return;
         state.closures = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
+        renderApp();
+    });
+    COL.users.onSnapshot(snap => {
+        if (snap.metadata.hasPendingWrites) return;
+        state.users = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
         renderApp();
     });
 }
@@ -304,7 +327,8 @@ function renderHeader() {
             <div class="logo">
                 ${getIcon('shopping-bag')} DINGO
             </div>
-            <div class="user-profile">
+            <div class="user-profile" style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 14px; font-weight: 500; color: var(--text-primary);">${state.currentUserName || 'Usuario'}</span>
                 ${getIcon('user')}
             </div>
         </header>
@@ -473,6 +497,13 @@ function renderSettings() {
                         <button class="admin-header-btn" style="background: transparent; border: none; color: var(--accent-primary); padding: 0; font-size: 13px;" onclick="resetQRImage()">Restaurar Original</button>
                     </div>
                 </div>
+                ${state.currentUserRole === 'admin' ? `
+                <div class="settings-item glass" onclick="openUserManagementModal()" style="cursor: pointer; background: rgba(138, 43, 226, 0.05); border: 1px solid rgba(138, 43, 226, 0.2);">
+                    ${getIcon('users', 'color: #8a2be2;')}
+                    <div style="flex: 1; font-weight: 600; color: #8a2be2;">Gestión de Usuarios y Roles</div>
+                    ${getIcon('chevron-right', 'color: #8a2be2;')}
+                </div>
+                ` : ''}
 
                 <div class="settings-item glass" style="flex-direction: column; align-items: flex-start; gap: 12px; cursor: default; background: rgba(0, 100, 255, 0.05); border: 1px solid rgba(0, 100, 255, 0.2);">
                     <div style="display:flex; align-items:center; gap: 16px; width: 100%;">
@@ -2329,14 +2360,14 @@ window.handleLogin = function(event) {
     const input = document.getElementById('login-password');
     const pwd = input.value.trim();
     
-    if (pwd === 'admin') {
-        state.currentUserRole = 'admin';
-        renderApp();
-    } else if (pwd === '123') {
-        state.currentUserRole = 'cashier';
+    const user = state.users.find(u => u.password === pwd);
+    
+    if (user) {
+        state.currentUserRole = user.role;
+        state.currentUserName = user.name;
         renderApp();
     } else {
-        showToast("Contraseña incorrecta", "alert-circle");
+        showToast("Contraseña o PIN incorrecto", "alert-circle");
         input.value = '';
         input.focus();
     }
@@ -2344,6 +2375,7 @@ window.handleLogin = function(event) {
 
 window.logout = function() {
     state.currentUserRole = null;
+    state.currentUserName = null;
     hideAllViews();
     renderLogin();
 };
@@ -2563,5 +2595,168 @@ window.renderStatisticsContent = function(period) {
     if(container) {
         container.innerHTML = html;
         lucide.createIcons();
+    }
+};
+
+// --- Gestión de Usuarios ---
+
+window.openUserManagementModal = function() {
+    let modalId = 'user-management-modal';
+    let modal = document.getElementById(modalId);
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = modalId;
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '3000';
+        document.body.appendChild(modal);
+    }
+    
+    // Sort users: admins first
+    const users = [...state.users].sort((a,b) => {
+        if (a.role === b.role) return a.name.localeCompare(b.name);
+        return a.role === 'admin' ? -1 : 1;
+    });
+
+    const usersHtml = users.map(u => `
+        <div class="glass" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px;">
+            <div style="text-align: left;">
+                <div style="font-weight: 600;">${u.name}</div>
+                <div style="font-size: 12px; color: ${u.role === 'admin' ? '#8a2be2' : 'var(--text-secondary)'}; text-transform: uppercase;">${u.role === 'admin' ? 'Administrador' : 'Cajero'}</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" class="action-btn" style="background: rgba(0, 100, 255, 0.1); color: #0064ff;" onclick="openAddEditUserModal(${u.id})">
+                    ${getIcon('edit-2', 'w-4 h-4')}
+                </button>
+                <button type="button" class="action-btn" style="background: rgba(255, 59, 48, 0.1); color: var(--danger);" onclick="deleteUser(${u.id})">
+                    ${getIcon('trash-2', 'w-4 h-4')}
+                </button>
+            </div>
+        </div>
+    `).join('');
+
+    modal.innerHTML = `
+        <div class="qr-modal glass" style="padding: 24px; width: 90%; max-width: 500px; text-align: center; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-title" style="margin-bottom: 8px; color: #8a2be2;">Gestión de Usuarios</div>
+            <div class="modal-subtitle" style="margin-bottom: 16px;">Administra los accesos al sistema</div>
+            
+            <button class="pay-btn" style="background: #8a2be2; margin-bottom: 16px; padding: 12px;" onclick="openAddEditUserModal()">
+                ${getIcon('plus', 'w-5 h-5')} Añadir Nuevo Usuario
+            </button>
+            
+            <div style="flex: 1; overflow-y: auto; margin-bottom: 16px; min-height: 150px;">
+                ${usersHtml || '<div style="color: var(--text-secondary);">No hay usuarios registrados</div>'}
+            </div>
+
+            <button class="pay-btn" style="background: transparent; color: var(--text-secondary); border: 1px solid var(--glass-border); padding: 12px;" onclick="document.getElementById('${modalId}').classList.remove('active')">
+                Cerrar
+            </button>
+        </div>
+    `;
+    lucide.createIcons();
+    setTimeout(() => modal.classList.add('active'), 10);
+};
+
+window.openAddEditUserModal = function(id = null) {
+    let modalId = 'add-edit-user-modal';
+    let modal = document.getElementById(modalId);
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = modalId;
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '3005';
+        document.body.appendChild(modal);
+    }
+    
+    let user = id ? state.users.find(u => u.id === id) : { name: '', password: '', role: 'cashier' };
+    
+    modal.innerHTML = `
+        <div class="qr-modal glass" style="padding: 24px; width: 90%; max-width: 400px; text-align: center;">
+            <div class="modal-title" style="margin-bottom: 24px;">${id ? 'Editar' : 'Nuevo'} Usuario</div>
+            
+            <form onsubmit="saveUser(event, ${id})" style="display: flex; flex-direction: column; gap: 16px; text-align: left;">
+                <div>
+                    <label style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Nombre Completo</label>
+                    <input type="text" id="user-name-input" class="form-input" value="${user.name}" required placeholder="Ej: Juan Pérez">
+                </div>
+                <div>
+                    <label style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Contraseña (Alfanumérica o PIN)</label>
+                    <input type="text" id="user-pass-input" class="form-input" value="${user.password}" required placeholder="Ej: admin123">
+                </div>
+                <div>
+                    <label style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Rol</label>
+                    <select id="user-role-input" class="form-input" style="width: 100%; padding: 12px; border-radius: 12px; background: rgba(0,0,0,0.1); border: 1px solid var(--glass-border); color: var(--text-primary);">
+                        <option value="cashier" ${user.role === 'cashier' ? 'selected' : ''}>Cajero</option>
+                        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador</option>
+                    </select>
+                </div>
+                
+                <div style="display: flex; gap: 12px; margin-top: 8px;">
+                    <button type="button" class="pay-btn" style="flex: 1; background: transparent; color: var(--text-secondary); border: 1px solid var(--glass-border);" onclick="document.getElementById('${modalId}').classList.remove('active')">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="pay-btn" style="flex: 1; background: #8a2be2;">
+                        Guardar
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    setTimeout(() => {
+        modal.classList.add('active');
+        const nameInput = document.getElementById('user-name-input');
+        if (nameInput && !id) nameInput.focus();
+    }, 10);
+};
+
+window.saveUser = async function(event, id) {
+    event.preventDefault();
+    const name = document.getElementById('user-name-input').value.trim();
+    const password = document.getElementById('user-pass-input').value.trim();
+    const role = document.getElementById('user-role-input').value;
+    
+    // Validar contraseña única para evitar conflictos en login
+    const existing = state.users.find(u => u.password === password && u.id !== id);
+    if (existing) {
+        showToast("Esta contraseña ya está en uso por otro usuario", "alert-circle");
+        return;
+    }
+    
+    if (id) {
+        const idx = state.users.findIndex(u => u.id === id);
+        if (idx !== -1) {
+            state.users[idx] = { ...state.users[idx], name, password, role };
+        }
+    } else {
+        const newId = state.users.length > 0 ? Math.max(...state.users.map(u => u.id)) + 1 : 1;
+        state.users.push({ id: newId, name, password, role });
+    }
+    
+    document.getElementById('add-edit-user-modal').classList.remove('active');
+    
+    try {
+        await saveDatabase(); // Esto sincronizará todos los cambios incl. usuarios
+        showToast("Usuario guardado", "check-circle");
+        openUserManagementModal(); // Refrescar lista
+    } catch (e) {
+        showToast("Error al guardar", "alert-triangle");
+        console.error(e);
+    }
+};
+
+window.deleteUser = async function(id) {
+    if (state.users.length <= 1) {
+        showToast("No puedes eliminar el único usuario del sistema", "alert-triangle");
+        return;
+    }
+    if (confirm("¿Estás seguro de eliminar este usuario?")) {
+        state.users = state.users.filter(u => u.id !== id);
+        try {
+            await saveDatabase(); // Sincroniza
+            showToast("Usuario eliminado", "trash-2");
+            openUserManagementModal(); // Refrescar lista
+        } catch (e) {
+            showToast("Error al eliminar", "alert-triangle");
+            console.error(e);
+        }
     }
 };
