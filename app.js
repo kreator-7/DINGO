@@ -927,7 +927,7 @@ function productCardHTML(product, context = 'catalog') {
 
     if (context === 'catalog') {
         return `
-            <div class="product-card glass" onclick="openEditProduct(${product.id})">
+            <div class="product-card glass" onclick="openEditProduct('${product.id}')">
                 <div class="product-image-container">
                     ${product.tag ? `<div class="tag">${product.tag}</div>` : ''}
                     <img src="${product.image}" alt="${product.name}" class="product-image">
@@ -945,7 +945,7 @@ function productCardHTML(product, context = 'catalog') {
         `;
     } else {
         return `
-            <div class="product-card glass" onclick="addToCart(${product.id})">
+            <div class="product-card glass" onclick="addToCart('${product.id}')">
                 <div class="product-image-container">
                     ${product.tag ? `<div class="tag">${product.tag}</div>` : ''}
                     <img src="${product.image}" alt="${product.name}" class="product-image">
@@ -954,7 +954,7 @@ function productCardHTML(product, context = 'catalog') {
                     <div class="product-name">${product.name}</div>
                     <div class="product-price">Bs ${product.price.toFixed(2)} <span class="product-unit" style="font-size:12px;color:var(--text-secondary);font-weight:400;">${product.unit}</span></div>
                 </div>
-                <button class="add-btn" onclick="event.stopPropagation(); addToCart(${product.id})">
+                <button class="add-btn" onclick="event.stopPropagation(); addToCart('${product.id}')">
                     ${getIcon('plus', 'w-4 h-4')}
                 </button>
             </div>
@@ -1519,14 +1519,14 @@ window.setCategory = function(cat) {
 
 function productListHTML(product) {
     return `
-        <div class="glass" style="display: flex; align-items: center; padding: 12px 16px; gap: 12px; cursor: pointer; border-radius: 16px; margin-bottom: 8px;" onclick="addToCart(${product.id})">
+        <div class="glass" style="display: flex; align-items: center; padding: 12px 16px; gap: 12px; cursor: pointer; border-radius: 16px; margin-bottom: 8px;" onclick="addToCart('${product.id}')">
             <div style="flex: 1; min-width: 0;">
                 <div style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);">${product.name}</div>
                 <div style="font-size: 12px; color: var(--text-secondary);">Stock: ${product.stock} ${product.unit} | ${product.category}</div>
             </div>
             <div style="font-weight: 700; color: var(--accent-primary); font-size: 16px;">Bs ${product.price.toFixed(2)}</div>
             <div style="display: flex; gap: 4px;">
-                <button class="admin-header-btn" style="padding: 6px; background: rgba(0,0,0,0.05); color: var(--text-primary);" onclick="event.stopPropagation(); openEditProduct(${product.id})">${getIcon('edit', 'w-4 h-4')}</button>
+                <button class="admin-header-btn" style="padding: 6px; background: rgba(0,0,0,0.05); color: var(--text-primary);" onclick="event.stopPropagation(); openEditProduct('${product.id}')">${getIcon('edit', 'w-4 h-4')}</button>
             </div>
         </div>
     `;
@@ -1794,7 +1794,7 @@ window.toggleAddProduct = function(open) {
         select.innerHTML = state.categories.slice(1).map(cat => `<option value="${cat}">${cat}</option>`).join('');
 
         if (state.editingProductId) {
-            const product = state.catalog.find(p => p.id === state.editingProductId);
+            const product = state.catalog.find(p => String(p.id) === String(state.editingProductId));
             title.textContent = "Editar Producto";
             submitBtn.innerHTML = `${getIcon('save')} Actualizar Producto`;
             deleteBtn.style.display = 'flex';
@@ -1866,7 +1866,7 @@ window.handleProductSubmit = function(event) {
     else if (preview.src && preview.src.startsWith('http')) photoUrl = preview.src; 
 
     if (state.editingProductId) {
-        const index = state.catalog.findIndex(p => p.id === state.editingProductId);
+        const index = state.catalog.findIndex(p => String(p.id) === String(state.editingProductId));
         if (index > -1) {
             state.catalog[index] = {
                 ...state.catalog[index],
@@ -1895,10 +1895,10 @@ window.handleProductSubmit = function(event) {
 window.deleteCurrentProduct = function() {
     if (state.editingProductId) {
         if (confirm("¿Seguro que deseas eliminar este producto?")) {
-            const index = state.catalog.findIndex(p => p.id === state.editingProductId);
+            const index = state.catalog.findIndex(p => String(p.id) === String(state.editingProductId));
             if (index > -1) {
                 state.catalog.splice(index, 1);
-                state.cart = state.cart.filter(item => item.product.id !== state.editingProductId);
+                state.cart = state.cart.filter(item => String(item.product.id) !== String(state.editingProductId));
             }
             toggleAddProduct(false);
             updateCatalogCategoriesDOM();
