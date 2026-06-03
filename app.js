@@ -1526,7 +1526,7 @@ function productListHTML(product) {
             </div>
             <div style="font-weight: 700; color: var(--accent-primary); font-size: 16px;">Bs ${product.price.toFixed(2)}</div>
             <div style="display: flex; gap: 4px;">
-                <button class="admin-header-btn" style="padding: 6px; background: rgba(0,0,0,0.05); color: var(--text-primary);" onclick="event.stopPropagation(); editProduct(${product.id})">${getIcon('edit', 'w-4 h-4')}</button>
+                <button class="admin-header-btn" style="padding: 6px; background: rgba(0,0,0,0.05); color: var(--text-primary);" onclick="event.stopPropagation(); openEditProduct(${product.id})">${getIcon('edit', 'w-4 h-4')}</button>
             </div>
         </div>
     `;
@@ -1557,10 +1557,12 @@ function updateCatalogView() {
     
     if (state.catalogViewMode === 'list') {
         grid.style.display = 'block';
+        grid.style.gridTemplateColumns = '';
+        grid.style.gap = '';
         grid.innerHTML = filtered.map(p => productListHTML(p)).join('');
     } else {
         grid.style.display = 'grid';
-        grid.style.gridTemplateColumns = '1fr 1fr';
+        grid.style.gridTemplateColumns = '';
         grid.style.gap = '16px';
         grid.innerHTML = filtered.map(p => productCardHTML(p, 'catalog')).join('');
     }

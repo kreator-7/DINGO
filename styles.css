@@ -572,3 +572,32 @@ header.scrolled {
     50% { opacity: 0.7; }
 }
 
+/* Responsive: Layout para Computadoras y Pantallas Grandes */
+@media (min-width: 768px) {
+    #app-container {
+        max-width: 1200px;
+    }
+    .bottom-nav {
+        max-width: 1200px;
+    }
+    .fab-container {
+        max-width: 1160px;
+    }
+    .modal-overlay {
+        max-width: 1200px;
+    }
+    .success-view {
+        max-width: 1200px;
+    }
+    .add-product-view {
+        max-width: 1200px;
+    }
+    .manage-categories-view {
+        max-width: 1200px;
+    }
+    .catalog-grid {
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+}
+
+
