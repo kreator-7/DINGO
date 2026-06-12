@@ -253,6 +253,25 @@ function activarSyncTiempoReal() {
         state.users = snap.docs.map(d => ({ ...d.data(), _fsId: d.id }));
         renderApp();
     });
+    COL.settings.onSnapshot(snap => {
+        if (snap.metadata.hasPendingWrites) return;
+        snap.docs.forEach(doc => {
+            if (doc.id === 'qrImage') {
+                state.qrImage = doc.data().value;
+                const qrImgDisplay = document.getElementById('qr-image-display');
+                if (qrImgDisplay) qrImgDisplay.src = state.qrImage;
+                const settingsQrPreview = document.getElementById('settings-qr-preview');
+                if (settingsQrPreview) settingsQrPreview.src = state.qrImage;
+            } else if (doc.id === 'scannerImage') {
+                state.scannerImage = doc.data().value;
+                const posContainer = document.getElementById('tab-pos');
+                if (posContainer) {
+                    const bg = posContainer.querySelector('.camera-feed');
+                    if (bg) bg.style.backgroundImage = `url('${state.scannerImage}')`;
+                }
+            }
+        });
+    });
 }
 
 async function exportDatabase() {
@@ -1746,6 +1765,13 @@ function renderCheckoutItems() {
 
 window.showPaymentModal = function() {
     if (state.cart.length === 0) return;
+    
+    // Asegurar que la imagen del QR se asigne dinámicamente cada vez que se muestra
+    const qrImgDisplay = document.getElementById('qr-image-display');
+    if (qrImgDisplay) {
+        qrImgDisplay.src = state.qrImage;
+    }
+    
     document.getElementById('qr-modal').classList.add('active');
 };
 
