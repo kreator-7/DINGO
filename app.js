@@ -51,6 +51,49 @@ async function fsClearAndBulk(col, items) {
     await batch.commit();
 }
 
+function compressImage(file, maxWidth, maxHeight, quality) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = new Image();
+            img.src = e.target.result;
+            img.onload = function() {
+                let width = img.width;
+                let height = img.height;
+                
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width = Math.round((width * maxHeight) / height);
+                        height = maxHeight;
+                    }
+                }
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+                resolve(compressedBase64);
+            };
+            img.onerror = function(err) {
+                reject(err);
+            };
+        };
+        reader.onerror = function(err) {
+            reject(err);
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+
 
 const defaultCatalog = [
     { id: 1, name: 'Manzanas Frescas (1kg)', price: 15.50, buyPrice: 10.00, stock: 50, unit: 'Bs', barcode: '100000000001', category: 'Frescos', image: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6fac6?auto=format&fit=crop&q=80&w=400', tag: 'Orgánico' },
@@ -479,6 +522,11 @@ function renderSettings() {
                         <div style="flex: 1; font-weight: 500;">Imagen de QR para Cobro</div>
                     </div>
                     
+                    <!-- Vista previa del QR actual -->
+                    <div id="qr-preview-container" style="width: 100%; display: flex; justify-content: center; margin-top: 4px; margin-bottom: 4px;">
+                        <img src="${state.qrImage}" id="settings-qr-preview" style="max-width: 150px; max-height: 150px; border-radius: 12px; border: 2px solid var(--glass-border); padding: 4px; background: white; object-fit: contain;">
+                    </div>
+                    
                     <div style="display: flex; gap: 8px; width: 100%;">
                         <div style="position: relative; flex: 1;">
                             <button type="button" class="admin-header-btn" style="width: 100%; justify-content: center; padding: 12px; background: rgba(0,0,0,0.05); color: var(--text-primary);">
@@ -497,13 +545,11 @@ function renderSettings() {
                         <button class="admin-header-btn" style="background: transparent; border: none; color: var(--accent-primary); padding: 0; font-size: 13px;" onclick="resetQRImage()">Restaurar Original</button>
                     </div>
                 </div>
-                ${state.currentUserRole === 'admin' ? `
                 <div class="settings-item glass" onclick="openUserManagementModal()" style="cursor: pointer; background: rgba(138, 43, 226, 0.05); border: 1px solid rgba(138, 43, 226, 0.2);">
                     ${getIcon('users', 'color: #8a2be2;')}
-                    <div style="flex: 1; font-weight: 600; color: #8a2be2;">Usuarios</div>
+                    <div style="flex: 1; font-weight: 600; color: #8a2be2;">${state.currentUserRole === 'admin' ? 'Usuarios (Administrar)' : 'Mi Usuario / Contraseña'}</div>
                     ${getIcon('chevron-right', 'color: #8a2be2;')}
                 </div>
-                ` : ''}
 
                 <div class="settings-item glass" style="flex-direction: column; align-items: flex-start; gap: 12px; cursor: default; background: rgba(0, 100, 255, 0.05); border: 1px solid rgba(0, 100, 255, 0.2);">
                     <div style="display:flex; align-items:center; gap: 16px; width: 100%;">
@@ -768,7 +814,7 @@ function renderBottomNav() {
     if (state.currentUserRole === 'cashier') {
         return `
             <div class="bottom-nav" id="bottom-nav">
-                <div class="nav-item active-pos" data-tab="pos" onclick="setTab('pos')">
+                <div class="nav-item ${state.currentTab === 'pos' ? 'active-pos' : ''}" data-tab="pos" onclick="setTab('pos')">
                     ${getIcon('scan-line')}
                     <span>POS</span>
                 </div>
@@ -780,9 +826,9 @@ function renderBottomNav() {
                     ${getIcon('lock')}
                     <span>Cierre</span>
                 </div>
-                <div class="nav-item" onclick="logout()" style="color: var(--danger);">
-                    ${getIcon('log-out')}
-                    <span>Salir</span>
+                <div class="nav-item ${state.currentTab === 'settings' ? 'active' : ''}" data-tab="settings" onclick="setTab('settings')">
+                    ${getIcon('settings')}
+                    <span>Ajustes</span>
                 </div>
             </div>
         `;
@@ -1381,22 +1427,25 @@ window.showDailySales = function() {
     setTimeout(() => modal.classList.add('active'), 10);
 };
 
-window.updateScannerImage = function(event) {
+window.updateScannerImage = async function(event) {
     const file = event.target.files[0];
     if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            state.scannerImage = e.target.result;
-            saveDatabase();
+        try {
+            showToast("Procesando fondo...", "loader");
+            const compressedBase64 = await compressImage(file, 800, 800, 0.6);
+            state.scannerImage = compressedBase64;
+            await saveDatabase();
             
             const posContainer = document.getElementById('tab-pos');
             if (posContainer) {
                 const bg = posContainer.querySelector('.camera-feed');
-            if (bg) bg.style.backgroundImage = `url('${state.scannerImage}')`;
+                if (bg) bg.style.backgroundImage = `url('${state.scannerImage}')`;
             }
             showToast("Fondo del escáner actualizado", "image");
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            console.error("Error al procesar fondo del escáner:", error);
+            showToast("Error al procesar la imagen", "alert-triangle");
+        }
     }
 };
 
@@ -1412,20 +1461,26 @@ window.resetScannerImage = function() {
     showToast("Fondo original restaurado", "refresh-cw");
 };
 
-window.updateQRImage = function(event) {
+window.updateQRImage = async function(event) {
     const file = event.target.files[0];
     if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            state.qrImage = e.target.result;
-            saveDatabase();
+        try {
+            showToast("Procesando código QR...", "loader");
+            const compressedBase64 = await compressImage(file, 400, 400, 0.7);
+            state.qrImage = compressedBase64;
+            await saveDatabase();
             
             const qrImgDisplay = document.getElementById('qr-image-display');
             if (qrImgDisplay) qrImgDisplay.src = state.qrImage;
             
+            const settingsQrPreview = document.getElementById('settings-qr-preview');
+            if (settingsQrPreview) settingsQrPreview.src = state.qrImage;
+            
             showToast("Imagen QR actualizada", "qr-code");
-        };
-        reader.readAsDataURL(file);
+        } catch (error) {
+            console.error("Error al procesar la imagen QR:", error);
+            showToast("Error al procesar la imagen", "alert-triangle");
+        }
     }
 };
 
@@ -1435,6 +1490,9 @@ window.resetQRImage = function() {
     
     const qrImgDisplay = document.getElementById('qr-image-display');
     if (qrImgDisplay) qrImgDisplay.src = state.qrImage;
+    
+    const settingsQrPreview = document.getElementById('settings-qr-preview');
+    if (settingsQrPreview) settingsQrPreview.src = state.qrImage;
     
     showToast("QR original restaurado", "refresh-cw");
 };
@@ -1828,16 +1886,23 @@ window.toggleAddProduct = function(open) {
     }
 };
 
-window.previewPhoto = function(event) {
+window.previewPhoto = async function(event) {
     const file = event.target.files[0];
     if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
+        try {
             const preview = document.getElementById('photo-preview-img');
-            preview.src = e.target.result;
+            const uploadText = document.getElementById('photo-upload-text');
+            if (uploadText) uploadText.textContent = "Procesando...";
+            
+            // Compress product image to max 400x400 at 0.7 quality
+            const compressedBase64 = await compressImage(file, 400, 400, 0.7);
+            preview.src = compressedBase64;
             preview.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
+            if (uploadText) uploadText.textContent = "Imagen lista";
+        } catch (error) {
+            console.error("Error al previsualizar la foto:", error);
+            showToast("Error al procesar la foto", "alert-triangle");
+        }
     }
 };
 
@@ -2612,8 +2677,42 @@ window.openUserManagementModal = function() {
         modal.style.zIndex = '3000';
         document.body.appendChild(modal);
     }
-    
-    // Sort users: admins first
+
+    // === CAJERO: solo puede ver y cambiar su propia contraseña ===
+    if (state.currentUserRole !== 'admin') {
+        const me = state.users.find(u => u.name === state.currentUserName);
+        modal.innerHTML = `
+            <div class="qr-modal glass" style="padding: 24px; width: 90%; max-width: 420px; text-align: center;">
+                <div class="modal-title" style="margin-bottom: 4px; color: #8a2be2;">Mi Usuario</div>
+                <div class="modal-subtitle" style="margin-bottom: 20px;">Cambia tu contraseña o PIN de acceso</div>
+                <div class="glass" style="padding: 16px; margin-bottom: 20px; text-align: left; border-radius: 16px;">
+                    <div style="font-weight: 700; font-size: 16px;">${me ? me.name : state.currentUserName}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; margin-top: 2px;">Cajero</div>
+                </div>
+                <div class="form-group" style="text-align: left; margin-bottom: 12px;">
+                    <label class="form-label">Nueva Contraseña / PIN</label>
+                    <input type="password" id="cashier-new-pwd" class="form-input" placeholder="Escribe tu nueva contraseña o PIN">
+                </div>
+                <div class="form-group" style="text-align: left; margin-bottom: 20px;">
+                    <label class="form-label">Confirmar Contraseña / PIN</label>
+                    <input type="password" id="cashier-confirm-pwd" class="form-input" placeholder="Repite la contraseña o PIN">
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <button class="pay-btn" style="background: #8a2be2; flex: 1; padding: 14px;" onclick="saveCashierPassword()">
+                        ${getIcon('save', 'w-5 h-5')} Guardar Cambios
+                    </button>
+                    <button class="pay-btn" style="background: transparent; color: var(--text-secondary); border: 1px solid var(--glass-border); padding: 14px;" onclick="document.getElementById('${modalId}').classList.remove('active')">
+                        Cancelar
+                    </button>
+                </div>
+            </div>
+        `;
+        lucide.createIcons();
+        setTimeout(() => modal.classList.add('active'), 10);
+        return;
+    }
+
+    // === ADMINISTRADOR: gestión completa de usuarios ===
     const users = [...state.users].sort((a,b) => {
         if (a.role === b.role) return a.name.localeCompare(b.name);
         return a.role === 'admin' ? -1 : 1;
@@ -2623,13 +2722,13 @@ window.openUserManagementModal = function() {
         <div class="glass" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px;">
             <div style="text-align: left;">
                 <div style="font-weight: 600;">${u.name}</div>
-                <div style="font-size: 12px; color: ${u.role === 'admin' ? '#8a2be2' : 'var(--text-secondary)'}; text-transform: uppercase;">${u.role === 'admin' ? 'Administrador' : 'Cajero'}</div>
+                <div style="font-size: 12px; color: ${u.role === 'admin' ? '#8a2be2' : 'var(--text-secondary)'}; text-transform: uppercase;">${u.role === 'admin' ? '👑 Administrador' : '🏪 Cajero'}</div>
             </div>
             <div style="display: flex; gap: 8px;">
-                <button type="button" class="action-btn" style="background: rgba(0, 100, 255, 0.1); color: #0064ff;" onclick="openAddEditUserModal(${u.id})">
+                <button type="button" class="action-btn" style="background: rgba(0, 100, 255, 0.1); color: #0064ff;" onclick="openAddEditUserModal('${u.id}')">
                     ${getIcon('edit-2', 'w-4 h-4')}
                 </button>
-                <button type="button" class="action-btn" style="background: rgba(255, 59, 48, 0.1); color: var(--danger);" onclick="deleteUser(${u.id})">
+                <button type="button" class="action-btn" style="background: rgba(255, 59, 48, 0.1); color: var(--danger);" onclick="deleteUser('${u.id}')">
                     ${getIcon('trash-2', 'w-4 h-4')}
                 </button>
             </div>
@@ -2638,7 +2737,7 @@ window.openUserManagementModal = function() {
 
     modal.innerHTML = `
         <div class="qr-modal glass" style="padding: 24px; width: 90%; max-width: 500px; text-align: center; max-height: 85vh; display: flex; flex-direction: column;">
-            <div class="modal-title" style="margin-bottom: 8px; color: #8a2be2;">Gestión de Usuarios</div>
+            <div class="modal-title" style="margin-bottom: 8px; color: #8a2be2;">👥 Gestión de Usuarios</div>
             <div class="modal-subtitle" style="margin-bottom: 16px;">Administra los accesos al sistema</div>
             
             <button class="pay-btn" style="background: #8a2be2; margin-bottom: 16px; padding: 12px;" onclick="openAddEditUserModal()">
